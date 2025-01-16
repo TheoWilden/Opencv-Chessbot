@@ -6,6 +6,7 @@ from io import BytesIO
 import time
 import tkinter as tk
 from PIL import ImageGrab, Image
+import chess.engine
 
 CHESS_BOARD_OUTPUT_DIR = os.path.join('dist')
 CHESS_PIECE_DIR = os.path.join('chess_piece')
@@ -144,6 +145,32 @@ def get_piece_color(square_img):
     
     return None
 
+def draw_move_arrow(image, move_str, square_size=300):
+    """Draw an arrow showing the chess move"""
+    # Chess square to coordinate conversion
+    file_to_x = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
+    rank_to_y = {'1': 7, '2': 6, '3': 5, '4': 4, '5': 3, '6': 2, '7': 1, '8': 0}
+    
+    # Extract from and to squares (e.g., "e2e4" or "g1f3")
+    from_file = move_str[0]
+    from_rank = move_str[1]
+    to_file = move_str[2]
+    to_rank = move_str[3]
+    
+    # Convert to pixel coordinates
+    from_x = file_to_x[from_file] * square_size + square_size // 2
+    from_y = rank_to_y[from_rank] * square_size + square_size // 2
+    to_x = file_to_x[to_file] * square_size + square_size // 2
+    to_y = rank_to_y[to_rank] * square_size + square_size // 2
+    
+    # Draw the arrow
+    cv2.arrowedLine(image, 
+                    (from_x, from_y), 
+                    (to_x, to_y),
+                    (0, 255, 255),  # Yellow color
+                    thickness=10,
+                    tipLength=0.3)
+
 def detectPieceOfChess(boardImage):
     # Remove board colors first
     boardImage = remove_board_colors(boardImage)
@@ -243,6 +270,30 @@ def detectPieceOfChess(boardImage):
                     
                     all_detections.append((x, y, best_piece))
     
+    # After all detections, before showing image
+    if all_detections:
+        fen = convert_detections_to_fen(all_detections, 2400)
+        print(f"FEN: {fen}")
+        
+        try:
+            best_move = get_best_move(fen)
+            print(f"Best move: {best_move}")
+            
+            # Draw arrow for the move
+            draw_move_arrow(displayImage, best_move)
+            
+            # Also draw the text
+            cv2.putText(displayImage, 
+                      f"Best move: {best_move}", 
+                      (10, 2350),
+                      cv2.FONT_HERSHEY_SIMPLEX, 
+                      2.0, 
+                      (0, 255, 255), 
+                      3)
+                      
+        except Exception as e:
+            print(f"Error getting best move: {str(e)}")
+    
     if EXPORT_IMAGE:
         timestamp = str(int(time.time()))
         cv2.imwrite(os.path.join(CHESS_BOARD_OUTPUT_DIR, f'board_{timestamp}.jpg'), displayImage)
@@ -333,6 +384,66 @@ def capture_screen():
         
     root.deiconify()
     detectPieceOfChess(cropped_board)
+
+def get_best_move(fen):
+    """Get best move from Stockfish"""
+    print("Starting Stockfish...")
+    engine = chess.engine.SimpleEngine.popen_uci(r"C:\Users\theob\Documents\stockfish\stockfish-windows-x86-64-avx2.exe")
+    
+    try:
+        print(f"Creating board from FEN: {fen}")
+        board = chess.Board(fen)
+        
+        print("Getting best move...")
+        result = engine.play(board, chess.engine.Limit(time=2.0))
+        best_move = result.move
+        
+        # Get the move in UCI format (e.g., "e2e4")
+        move_str = best_move.uci()
+        print(f"Found best move: {move_str}")
+        
+        return move_str
+        
+    finally:
+        print("Closing Stockfish...")
+        engine.quit()
+
+def convert_detections_to_fen(all_detections, board_size):
+    """Convert piece detections to FEN string"""
+    # Initialize 8x8 empty board
+    board = [['' for _ in range(8)] for _ in range(8)]
+    square_size = board_size // 8
+    
+    # Fill in detected pieces
+    for x, y, piece in all_detections:
+        row = y // square_size
+        col = x // square_size
+        board[row][col] = piece
+    
+    # Convert to FEN
+    fen_rows = []
+    for row in board:
+        empty_count = 0
+        fen_row = ''
+        for cell in row:
+            if cell == '':
+                empty_count += 1
+            else:
+                if empty_count > 0:
+                    fen_row += str(empty_count)
+                    empty_count = 0
+                fen_row += cell
+        if empty_count > 0:
+            fen_row += str(empty_count)
+        fen_rows.append(fen_row)
+    
+    # Join rows with '/'
+    fen = '/'.join(fen_rows)
+    
+    # Add additional FEN fields (assuming white to move, all castling available)
+    fen += ' w KQkq - 0 1'
+    
+    return fen
 
 # Create GUI window
 root = tk.Tk()
