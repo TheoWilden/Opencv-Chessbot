@@ -24,18 +24,18 @@ os.makedirs(CHESS_PIECE_DIR, exist_ok=True)
 
 # The threshold values for each chess piece can be adjusted according to the image quality
 chessPieceThreshold = {
+    'K': 0.40, #king - increased threshold
+    'k': 0.35, #king_black
+    'Q': 0.40, #queen - increased threshold
+    'q': 0.35, #queen_black
     'B': 0.20, #bishop
-    'b': 0.02, #bishop_black
-    'K': 0.20, #king
-    'k': 0.02, #king_black
+    'b': 0.15, #bishop_black
     'N': 0.20, #knight
-    'n': 0.02, #knight_black
-    'P': 0.20, #pawn
-    'p': 0.01, #pawn_black
-    'Q': 1.95, #queen
-    'q': 0.02, #queen_black
+    'n': 0.15, #knight_black
     'R': 0.20, #rook
-    'r': 0.02, #rook_black
+    'r': 0.15, #rook_black
+    'P': 0.15, #pawn - decreased threshold
+    'p': 0.10, #pawn_black
 }
 
 def download_piece_image(piece):
@@ -111,32 +111,42 @@ def remove_board_colors(image):
 
 def get_piece_color(square_img):
     """Determine if a piece is present based on specific piece colors"""
-    # Define the piece colors in BGR
-    white_piece = np.array([249, 249, 249])  # #F9F9F9
-    black_piece = np.array([87, 89, 93])     # #5D5957
+    # Define the piece colors in BGR with wider range
+    white_colors = [
+        np.array([249, 249, 249]),  # #F9F9F9
+        np.array([240, 240, 240]),  # Slightly darker white
+    ]
+    black_colors = [
+        np.array([87, 89, 93]),     # #5D5957
+        np.array([70, 70, 70]),     # Slightly darker black
+    ]
     
-    # Create masks for piece colors with small tolerance
-    tolerance = 10
-    white_mask = cv2.inRange(square_img, 
-                            white_piece - tolerance,
-                            white_piece + tolerance)
-    black_mask = cv2.inRange(square_img, 
-                            black_piece - tolerance,
-                            black_piece + tolerance)
+    # Increase tolerance for better detection
+    tolerance = 15
     
-    # Count pixels of each color
-    white_pixels = np.sum(white_mask > 0)
-    black_pixels = np.sum(black_mask > 0)
+    # Check for white pieces
+    white_pixels = 0
+    for white_color in white_colors:
+        white_mask = cv2.inRange(square_img, 
+                                white_color - tolerance,
+                                white_color + tolerance)
+        white_pixels += np.sum(white_mask > 0)
     
-    # Check if we have enough pixels of either color (minimum 10 pixels)
-    if white_pixels < 10 and black_pixels < 10:
+    # Check for black pieces
+    black_pixels = 0
+    for black_color in black_colors:
+        black_mask = cv2.inRange(square_img, 
+                                black_color - tolerance,
+                                black_color + tolerance)
+        black_pixels += np.sum(black_mask > 0)
+    
+    # Increase minimum pixel threshold
+    min_pixels = 20
+    
+    if white_pixels < min_pixels and black_pixels < min_pixels:
         return None
         
-    # If we have enough pixels, determine which color is more present
-    if white_pixels > black_pixels:
-        return 'white_piece'
-    else:
-        return 'black_piece'
+    return 'white_piece' if white_pixels > black_pixels else 'black_piece'
 
 def draw_move_arrow(image, move_str, square_size=300):
     """Draw an arrow showing the chess move"""
@@ -177,10 +187,12 @@ def detectPieceOfChess(boardImage):
     # Store all detections
     all_detections = []
     
-    # Process pieces in specific order
-    piece_order = ['Q']  # Start with white queen
-    piece_order.extend([p for p in sorted(chessPieceImages.keys()) if p.isupper() and p != 'Q'])  # Other white pieces
-    piece_order.extend([p for p in sorted(chessPieceImages.keys()) if p.islower()])  # Black pieces
+    # Process pieces in specific order - prioritize kings and queens
+    piece_order = ['K', 'k', 'Q', 'q']  # Start with kings and queens
+    piece_order.extend([p for p in sorted(chessPieceImages.keys()) 
+                       if p.isupper() and p not in ['K', 'Q']])  # Other white pieces
+    piece_order.extend([p for p in sorted(chessPieceImages.keys()) 
+                       if p.islower() and p not in ['k', 'q']])  # Other black pieces
     
     # Iterate through each square on the board
     for row in range(8):
