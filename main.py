@@ -4,9 +4,15 @@ import os
 import requests
 from io import BytesIO
 import time
-import tkinter as tk
 from PIL import ImageGrab, Image
 import chess.engine
+from screeninfo import get_monitors
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QProgressBar, QLineEdit, QCompleter
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QFont, QImage, QPixmap, QPainter, QPen, QColor
+import sys
+import tkinter as tk
+from PIL import ImageTk
 
 CHESS_BOARD_OUTPUT_DIR = os.path.join('dist')
 CHESS_PIECE_DIR = os.path.join('chess_piece')
@@ -118,32 +124,19 @@ def get_piece_color(square_img):
                             black_piece - tolerance,
                             black_piece + tolerance)
     
-    # Check if either color is present
-    has_white = np.any(white_mask > 0)
-    has_black = np.any(black_mask > 0)
+    # Count pixels of each color
+    white_pixels = np.sum(white_mask > 0)
+    black_pixels = np.sum(black_mask > 0)
     
-    if not (has_white or has_black):
+    # Check if we have enough pixels of either color (minimum 10 pixels)
+    if white_pixels < 10 and black_pixels < 10:
         return None
         
-    # If we have piece colors, proceed with full detection
-    gray = cv2.cvtColor(square_img, cv2.COLOR_BGR2GRAY)
-    
-    # Count dark and light pixels
-    dark_pixels = np.sum(gray < 100)
-    light_pixels = np.sum(gray > 200)
-    total_pixels = gray.size
-    
-    dark_percentage = dark_pixels / total_pixels
-    light_percentage = light_pixels / total_pixels
-    
-    # If significant dark pixels, it's a black piece
-    if dark_percentage > 0.15:
-        return 'black_piece'
-    # If significant light pixels, it's a white piece
-    elif light_percentage > 0.15:
+    # If we have enough pixels, determine which color is more present
+    if white_pixels > black_pixels:
         return 'white_piece'
-    
-    return None
+    else:
+        return 'black_piece'
 
 def draw_move_arrow(image, move_str, square_size=300):
     """Draw an arrow showing the chess move"""
@@ -298,11 +291,65 @@ def detectPieceOfChess(boardImage):
         timestamp = str(int(time.time()))
         cv2.imwrite(os.path.join(CHESS_BOARD_OUTPUT_DIR, f'board_{timestamp}.jpg'), displayImage)
     
-    if SHOW_IMAGE:
-        cv2.namedWindow('Chess Detection', cv2.WINDOW_NORMAL)
-        cv2.imshow('Chess Detection', displayImage)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    return displayImage, all_detections  # Return both image and detections
+
+def draw_overlay_arrow(screenshot, board_coords, move_str, root):
+    """Draw arrow overlay on screen"""
+    x, y, w, h = board_coords  # Get board position from detection
+    print(f"Drawing overlay at: {x}, {y}, {w}x{h}")  # Debug print
+    
+    # Create overlay window
+    overlay = tk.Toplevel(root)
+    overlay.title("")
+    overlay.attributes('-alpha', 0.7)  # Set transparency
+    overlay.attributes('-topmost', True)  # Keep on top
+    overlay.overrideredirect(True)  # Remove window decorations
+    overlay.attributes('-transparentcolor', 'black')  # Make black background transparent
+    
+    # Position overlay
+    overlay.geometry(f"{w}x{h}+{x}+{y}")
+    
+    # Create canvas for drawing
+    canvas = tk.Canvas(overlay, width=w, height=h, 
+                      highlightthickness=0, bg='black')
+    canvas.pack()
+    
+    # Convert chess coordinates to screen coordinates
+    file_to_x = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
+    rank_to_y = {'1': 7, '2': 6, '3': 5, '4': 4, '5': 3, '6': 2, '7': 1, '8': 0}
+    
+    square_size = w // 8
+    
+    # Calculate arrow coordinates
+    from_file = move_str[0]
+    from_rank = move_str[1]
+    to_file = move_str[2]
+    to_rank = move_str[3]
+    
+    from_x = file_to_x[from_file] * square_size + square_size // 2
+    from_y = rank_to_y[from_rank] * square_size + square_size // 2
+    to_x = file_to_x[to_file] * square_size + square_size // 2
+    to_y = rank_to_y[to_rank] * square_size + square_size // 2
+    
+    print(f"Drawing arrow from ({from_x}, {from_y}) to ({to_x}, {to_y})")  # Debug print
+    
+    # Draw arrow on canvas
+    canvas.create_line(from_x, from_y, to_x, to_y,
+                      fill='yellow', width=5,
+                      arrow=tk.LAST, arrowshape=(16, 20, 6))
+    
+    # Add small close button in corner
+    close_btn = tk.Button(overlay, text="×", 
+                         command=overlay.destroy,
+                         bg='#2c2c2c',
+                         fg='white',
+                         font=('Arial', 12),
+                         relief='flat',
+                         width=2,
+                         height=1)
+    close_btn.place(x=0, y=0)
+    
+    return overlay
 
 def detect_chessboard(image):
     """Detect and crop chessboard using exact chess.com colors"""
@@ -334,11 +381,10 @@ def detect_chessboard(image):
                                  cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
-        return None
+        return None, None
     
     # Find the largest contour that could be the chessboard
     largest_contour = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(largest_contour)
     
     # Get the bounding rectangle
     x, y, w, h = cv2.boundingRect(largest_contour)
@@ -349,41 +395,79 @@ def detect_chessboard(image):
     # Calculate the total board size
     board_size = square_size * 8
     
-    # Calculate center of the detected region
-    center_x = x + w // 2
-    center_y = y + h // 2
-    
-    # Calculate new coordinates for exact board size
-    x = center_x - board_size // 2
-    y = center_y - board_size // 2
-    
     # Crop the chessboard region
     cropped = image[y:y+board_size, x:x+board_size]
     
     # Resize to 2400x2400 for better piece detection
     cropped = cv2.resize(cropped, (2400, 2400))
     
-    return cropped
+    return cropped, (x, y, board_size, board_size)  # Return both cropped image and original coordinates
 
-def capture_screen():
-    # Add a small delay to allow user to switch to the chess board window
-    root.iconify()  # Minimize the window
-    time.sleep(2)  # Wait 2 seconds
-    
-    # Capture the screen
-    screenshot = ImageGrab.grab()
-    # Convert PIL image to OpenCV format
-    screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-    
-    # Add chessboard detection
-    cropped_board = detect_chessboard(screenshot)
-    if cropped_board is None:
-        print("Could not detect chessboard")
-        root.deiconify()
-        return
+class DetectionWindow(QWidget):
+    def __init__(self, image):
+        super().__init__()
+        self.setWindowTitle("Chess Detection Results")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint)
         
-    root.deiconify()
-    detectPieceOfChess(cropped_board)
+        # Convert OpenCV image to RGB for display
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = image.shape[:2]
+        
+        # Convert to QImage
+        qimage = QImage(image.data, w, h, w*3, QImage.Format_RGB888)
+        
+        # Create label to display image
+        self.image_label = QLabel()
+        self.image_label.setPixmap(QPixmap.fromImage(qimage))
+        
+        # Create layout
+        layout = QVBoxLayout()
+        layout.addWidget(self.image_label)
+        self.setLayout(layout)
+        
+        # Resize window to fit image
+        self.resize(800, 800)
+
+def show_detection_window(image, root):
+    """Show detection results in a new window"""
+    # Convert OpenCV image to PIL format
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = Image.fromarray(image)
+    # Resize to a reasonable size while maintaining aspect ratio
+    image.thumbnail((800, 800))
+    
+    # Create Tkinter window
+    debug_window = tk.Toplevel(root)
+    debug_window.title("Chess Detection Results")
+    debug_window.attributes('-topmost', True)
+    
+    # Convert PIL image to PhotoImage
+    photo = ImageTk.PhotoImage(image)
+    
+    # Create label to display image
+    label = tk.Label(debug_window, image=photo)
+    label.image = photo  # Keep a reference!
+    label.pack(padx=10, pady=10)
+    
+    def safe_destroy():
+        try:
+            debug_window.destroy()
+            if debug_window in window.debug_windows:
+                window.debug_windows.remove(debug_window)
+        except:
+            pass
+    
+    # Add proper close button
+    close_btn = tk.Button(debug_window, text="Close", 
+                         command=safe_destroy)
+    close_btn.pack(pady=5)
+    
+    # Handle window close button (X)
+    debug_window.protocol("WM_DELETE_WINDOW", safe_destroy)
+    
+    # Keep track of window
+    window.debug_windows.append(debug_window)
+    return debug_window
 
 def get_best_move(fen):
     """Get best move from Stockfish"""
@@ -445,17 +529,483 @@ def convert_detections_to_fen(all_detections, board_size):
     
     return fen
 
-# Create GUI window
-root = tk.Tk()
-root.title("Chess Piece Detector")
-root.geometry("200x100")
+class ChessDetectorWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        
+        # Store references to windows
+        self.debug_window = None
+        self.current_overlay = None
+        self.debug_enabled = False
+        
+        # Create main widget and layout
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        
+        # Create title bar
+        self.title_bar = QWidget()
+        self.title_bar.setStyleSheet("background-color: #2c2c2c;")
+        self.title_bar.setFixedHeight(30)
+        
+        # Use horizontal layout for title bar
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(10, 0, 10, 0)
+        
+        # Add title text
+        self.title_label = QLabel("Chess Piece Detector")
+        self.title_label.setStyleSheet("color: white;")
+        self.title_label.setFont(QFont('Arial', 10))
+        title_layout.addWidget(self.title_label)
+        
+        # Add close button
+        self.close_button = QPushButton("×")
+        self.close_button.setStyleSheet("""
+            QPushButton {
+                color: white;
+                border: none;
+                background: transparent;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #c93537;
+            }
+        """)
+        self.close_button.setFixedSize(30, 30)
+        self.close_button.clicked.connect(self.close)
+        title_layout.addWidget(self.close_button)
+        
+        # Add title bar to main layout
+        self.layout.addWidget(self.title_bar)
+        
+        # Create content area
+        content = QWidget()
+        content.setStyleSheet("background-color: #363636;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(15)  # Increased spacing between elements
+        
+        # Create capture button
+        self.capture_btn = QPushButton("Capture Screen")
+        self.capture_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+        """)
+        self.capture_btn.setCursor(Qt.PointingHandCursor)
+        self.capture_btn.clicked.connect(self.capture_screen)
+        content_layout.addWidget(self.capture_btn)
+        
+        # Create remove arrows button
+        self.remove_arrows_btn = QPushButton("Remove Arrows")
+        self.remove_arrows_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+        """)
+        self.remove_arrows_btn.setCursor(Qt.PointingHandCursor)
+        self.remove_arrows_btn.clicked.connect(self.remove_arrows)
+        content_layout.addWidget(self.remove_arrows_btn)
+        
+        # Add debug toggle switch
+        self.debug_checkbox = QPushButton("Debug Mode: Off")
+        self.debug_checkbox.setCheckable(True)
+        self.debug_checkbox.setStyleSheet("""
+            QPushButton {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 5px;
+                min-height: 20px;
+                text-align: left;
+                padding-left: 15px;
+            }
+            QPushButton:checked {
+                background-color: #45a049;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+            QPushButton:checked:hover {
+                background-color: #3d8b41;
+            }
+        """)
+        self.debug_checkbox.clicked.connect(self.toggle_debug)
+        content_layout.addWidget(self.debug_checkbox)
+        
+        # Create piece style input with auto-complete
+        style_container = QHBoxLayout()
+        style_label = QLabel("Style:")
+        style_label.setStyleSheet("color: white;")
+        style_container.addWidget(style_label)
+        
+        self.style_input = QLineEdit()
+        self.style_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 3px;
+                margin-left: 5px;
+            }
+            QLineEdit:focus {
+                background-color: #5a5a5a;
+            }
+        """)
+        self.style_input.setText("neo")
+        self.style_input.setPlaceholderText("Enter piece style")
+        
+        # Add auto-complete
+        completer = QCompleter(["neo", "cases", "chess24", "classic", "modern"])
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.style_input.setCompleter(completer)
+        
+        # Connect returnPressed instead of textChanged
+        self.style_input.returnPressed.connect(self.on_style_enter)
+        
+        style_container.addWidget(self.style_input)
+        content_layout.addLayout(style_container)
+        
+        # Add progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 2px;
+                background-color: #4a4a4a;
+                height: 4px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #45a049;
+                border-radius: 2px;
+            }
+        """)
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setValue(0)
+        content_layout.addWidget(self.progress_bar)
+        
+        # Create instructions label
+        instructions = QLabel("Press button and switch\nto chess board window")
+        instructions.setStyleSheet("color: white;")
+        instructions.setAlignment(Qt.AlignCenter)
+        content_layout.addWidget(instructions)
+        
+        # Add content to main layout
+        self.layout.addWidget(content)
+        
+        # Window setup
+        self.setMinimumSize(200, 300)  # Slightly increased height
+        self.resize(200, 300)
+        
+        # For dragging
+        self.dragging = False
+        self.offset = QPoint()
 
-# Create capture button
-capture_btn = tk.Button(root, text="Capture Screen", command=capture_screen)
-capture_btn.pack(expand=True)
+    def toggle_debug(self):
+        """Toggle debug mode"""
+        self.debug_enabled = self.debug_checkbox.isChecked()
+        self.debug_checkbox.setText("Debug Mode: On" if self.debug_enabled else "Debug Mode: Off")
+        if not self.debug_enabled and self.debug_window:
+            self.debug_window.close()
+            self.debug_window = None
 
-# Create instructions label
-instructions = tk.Label(root, text="Press button and switch\nto chess board window", justify=tk.CENTER)
-instructions.pack(expand=True)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.title_bar.geometry().contains(event.pos()):
+            self.dragging = True
+            self.offset = event.pos()
 
-root.mainloop()
+    def mouseMoveEvent(self, event):
+        if self.dragging:
+            self.move(self.mapToGlobal(event.pos() - self.offset))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dragging = False
+
+    def capture_screen(self):
+        """Capture and process the screen"""
+        # Close any existing windows
+        if self.current_overlay:
+            self.current_overlay.close()
+            self.current_overlay = None
+        
+        if self.debug_window:
+            self.debug_window.close()
+            self.debug_window = None
+        
+        # Reset progress bar
+        self.progress_bar.setValue(0)
+        QApplication.processEvents()  # Update UI
+        
+        # Get screen size including all monitors
+        monitors = []
+        for m in get_monitors():
+            monitors.append({
+                'left': m.x,
+                'top': m.y,
+                'width': m.width,
+                'height': m.height
+            })
+        
+        # Calculate total bounding box
+        left = min(m['left'] for m in monitors)
+        top = min(m['top'] for m in monitors)
+        right = max(m['left'] + m['width'] for m in monitors)
+        bottom = max(m['top'] + m['height'] for m in monitors)
+        
+        # Capture the entire screen area immediately
+        screenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
+        screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+        
+        self.progress_bar.setValue(25)
+        QApplication.processEvents()
+        
+        cropped_board, board_coords = detect_chessboard(screenshot_cv)
+        if cropped_board is None:
+            print("Could not detect chessboard")
+            self.progress_bar.setValue(0)
+            return
+        
+        self.progress_bar.setValue(50)
+        QApplication.processEvents()
+        
+        displayImage, detections = detectPieceOfChess(cropped_board)
+        
+        self.progress_bar.setValue(75)
+        QApplication.processEvents()
+        
+        # Show debug window only if enabled
+        if self.debug_enabled:
+            self.show_detection_window(displayImage)
+        
+        # Get best move and draw overlay
+        if detections:
+            fen = convert_detections_to_fen(detections, 2400)
+            try:
+                best_move = get_best_move(fen)
+                self.show_move_overlay(board_coords, best_move)
+                self.progress_bar.setValue(100)
+            except Exception as e:
+                print(f"Error processing move: {str(e)}")
+                self.progress_bar.setValue(0)
+        else:
+            self.progress_bar.setValue(0)
+
+    def show_detection_window(self, image):
+        """Show detection results in a new PyQt window"""
+        # Convert OpenCV image to RGB for display
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = image.shape[:2]
+        
+        # Create new window
+        if self.debug_window is None:
+            self.debug_window = QWidget()
+            self.debug_window.setWindowTitle("Chess Detection Results")
+            self.debug_window.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+            
+            # Create layout
+            layout = QVBoxLayout()
+            self.debug_window.setLayout(layout)
+            
+            # Create close button
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(self.debug_window.close)
+            
+            # Add widgets to layout
+            self.image_label = QLabel()
+            layout.addWidget(self.image_label)
+            layout.addWidget(close_btn)
+        
+        # Convert to QImage and update label
+        qimage = QImage(image.data, w, h, w*3, QImage.Format_RGB888)
+        self.image_label.setPixmap(QPixmap.fromImage(qimage).scaled(
+            800, 800, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        # Show window
+        self.debug_window.show()
+
+    def show_move_overlay(self, board_coords, move_str):
+        """Show move overlay using PyQt"""
+        x, y, w, h = board_coords
+        
+        # Create overlay window
+        overlay = QWidget()
+        overlay.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        overlay.setAttribute(Qt.WA_TranslucentBackground)
+        overlay.setGeometry(x, y, w, h)
+        
+        # Create a canvas for drawing
+        class ArrowCanvas(QWidget):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.setAttribute(Qt.WA_TranslucentBackground)
+                
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.Antialiasing)
+                
+                # Convert chess coordinates to screen coordinates
+                file_to_x = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
+                rank_to_y = {'1': 7, '2': 6, '3': 5, '4': 4, '5': 3, '6': 2, '7': 1, '8': 0}
+                
+                square_size = w // 8
+                
+                # Calculate arrow coordinates
+                from_file = move_str[0]
+                from_rank = move_str[1]
+                to_file = move_str[2]
+                to_rank = move_str[3]
+                
+                from_x = file_to_x[from_file] * square_size + square_size // 2
+                from_y = rank_to_y[from_rank] * square_size + square_size // 2
+                to_x = file_to_x[to_file] * square_size + square_size // 2
+                to_y = rank_to_y[to_rank] * square_size + square_size // 2
+                
+                # Draw arrow
+                pen = QPen(QColor(255, 255, 0))  # Yellow color
+                pen.setWidth(5)
+                painter.setPen(pen)
+                
+                # Draw line
+                painter.drawLine(from_x, from_y, to_x, to_y)
+                
+                # Draw arrowhead
+                angle = np.arctan2(to_y - from_y, to_x - from_x)
+                arrow_size = 20
+                arrow_angle = np.pi / 6  # 30 degrees
+                
+                # Calculate arrowhead points and convert to integers
+                p1 = QPoint(
+                    int(to_x - arrow_size * np.cos(angle - arrow_angle)),
+                    int(to_y - arrow_size * np.sin(angle - arrow_angle))
+                )
+                p2 = QPoint(
+                    int(to_x - arrow_size * np.cos(angle + arrow_angle)),
+                    int(to_y - arrow_size * np.sin(angle + arrow_angle))
+                )
+                
+                # Draw arrowhead
+                painter.drawLine(to_x, to_y, p1.x(), p1.y())
+                painter.drawLine(to_x, to_y, p2.x(), p2.y())
+        
+        # Create and add the canvas
+        canvas = ArrowCanvas(overlay)
+        canvas.resize(w, h)
+        
+        # Add small close button
+        close_btn = QPushButton("×", overlay)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                color: white;
+                background-color: #2c2c2c;
+                border: none;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #c93537;
+            }
+        """)
+        close_btn.setFixedSize(20, 20)
+        close_btn.clicked.connect(overlay.close)
+        close_btn.move(0, 0)
+        
+        # Store reference to prevent garbage collection
+        self.current_overlay = overlay
+        overlay.show()
+
+    def remove_arrows(self):
+        """Remove all arrow overlays"""
+        if self.current_overlay:
+            self.current_overlay.close()
+            self.current_overlay = None
+
+    def on_style_enter(self):
+        """Handle style change when Enter is pressed"""
+        new_style = self.style_input.text().strip().lower()  # Convert to lowercase
+        if not new_style:
+            return
+        
+        try:
+            # Clear the chess pieces directory
+            chess_piece_dir = CHESS_PIECE_DIR  # Use the same directory as startup
+            if os.path.exists(chess_piece_dir):
+                for file in os.listdir(chess_piece_dir):
+                    file_path = os.path.join(chess_piece_dir, file)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                    except Exception as e:
+                        print(f"Error deleting {file_path}: {e}")
+        
+            # Reset progress bar
+            self.progress_bar.setValue(0)
+            QApplication.processEvents()
+            
+            # Download new pieces using the same method as startup
+            for piece in chessPieceThreshold.keys():
+                # Update progress
+                progress = int((list(chessPieceThreshold.keys()).index(piece) + 1) / len(chessPieceThreshold) * 100)
+                self.progress_bar.setValue(progress)
+                QApplication.processEvents()
+                
+                color = 'b' if piece.islower() else 'w'
+                filename = f'{color}{piece.lower()}.png'
+                filepath = os.path.join(CHESS_PIECE_DIR, filename)
+                
+                # Use the exact same URL as startup
+                url = f'https://www.chess.com/chess-themes/pieces/{new_style}/300/{color}{piece.lower()}.png'
+                response = requests.get(url)
+                
+                if response.status_code == 200:
+                    # Convert to PIL Image
+                    img = Image.open(BytesIO(response.content))
+                    # Convert to RGBA if not already
+                    img = img.convert('RGBA')
+                    # Save the original image
+                    img.save(filepath)
+                else:
+                    print(f"Failed to download {piece}: {response.status_code}")
+                    return  # Stop if any piece fails
+            
+            # Reset progress bar after download
+            self.progress_bar.setValue(0)
+            
+            # Clear focus from input
+            self.style_input.clearFocus()
+            
+        except Exception as e:
+            print(f"Error updating chess pieces: {e}")
+            self.progress_bar.setValue(0)
+
+# Create and run application
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = ChessDetectorWindow()
+    window.show()
+    sys.exit(app.exec_())
+
