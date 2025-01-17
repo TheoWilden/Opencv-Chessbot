@@ -8,7 +8,7 @@ from PIL import ImageGrab, Image
 import chess.engine
 from screeninfo import get_monitors
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QProgressBar, QLineEdit, QCompleter
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import QFont, QImage, QPixmap, QPainter, QPen, QColor
 import sys
 import tkinter as tk
@@ -114,7 +114,8 @@ def get_piece_color(square_img):
     # Define the piece colors in BGR with wider range
     white_colors = [
         np.array([249, 249, 249]),  # #F9F9F9
-        np.array([240, 240, 240]),  # Slightly darker white
+        np.array([240, 240, 240]),
+        # np.array([118, 195, 240]),  # #F0C376
     ]
     black_colors = [
         np.array([87, 89, 93]),     # #5D5957
@@ -154,13 +155,13 @@ def draw_move_arrow(image, move_str, square_size=300):
     file_to_x = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
     rank_to_y = {'1': 7, '2': 6, '3': 5, '4': 4, '5': 3, '6': 2, '7': 1, '8': 0}
     
-    # Extract from and to squares (e.g., "e2e4" or "g1f3")
+    # Extract from and to squares
     from_file = move_str[0]
     from_rank = move_str[1]
     to_file = move_str[2]
     to_rank = move_str[3]
     
-    # Convert to pixel coordinates
+    
     from_x = file_to_x[from_file] * square_size + square_size // 2
     from_y = rank_to_y[from_rank] * square_size + square_size // 2
     to_x = file_to_x[to_file] * square_size + square_size // 2
@@ -170,7 +171,7 @@ def draw_move_arrow(image, move_str, square_size=300):
     cv2.arrowedLine(image, 
                     (from_x, from_y), 
                     (to_x, to_y),
-                    (0, 255, 255),  # Yellow color
+                    (0, 0, 255),  #bgr so this is red
                     thickness=10,
                     tipLength=0.3)
 
@@ -285,6 +286,11 @@ def detectPieceOfChess(boardImage):
             print(f"Best move: {best_move}")
             
             # Draw arrow for the move
+            # if window.team_selector.isChecked():
+            #     from_x = (7 - file_to_x[from_file]) * square_size + square_size // 2
+            #     from_y = (7 - rank_to_y[from_rank]) * square_size + square_size // 2
+            #     to_x = (7 - file_to_x[to_file]) * square_size + square_size // 2
+            #     to_y = (7 - rank_to_y[to_rank]) * square_size + square_size // 2
             draw_move_arrow(displayImage, best_move)
             
             # Also draw the text
@@ -326,28 +332,35 @@ def draw_overlay_arrow(screenshot, board_coords, move_str, root):
                       highlightthickness=0, bg='black')
     canvas.pack()
     
+    square_size = w // 8
+    
     # Convert chess coordinates to screen coordinates
     file_to_x = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
     rank_to_y = {'1': 7, '2': 6, '3': 5, '4': 4, '5': 3, '6': 2, '7': 1, '8': 0}
     
-    square_size = w // 8
-    
-    # Calculate arrow coordinates
+    # Get move coordinates
     from_file = move_str[0]
     from_rank = move_str[1]
     to_file = move_str[2]
     to_rank = move_str[3]
     
-    from_x = file_to_x[from_file] * square_size + square_size // 2
-    from_y = rank_to_y[from_rank] * square_size + square_size // 2
-    to_x = file_to_x[to_file] * square_size + square_size // 2
-    to_y = rank_to_y[to_rank] * square_size + square_size // 2
+    # If playing as black, flip the coordinates
+    if window.team_selector.isChecked():
+        from_x = (7 - file_to_x[from_file]) * square_size + square_size // 2
+        from_y = (7 - rank_to_y[from_rank]) * square_size + square_size // 2
+        to_x = (7 - file_to_x[to_file]) * square_size + square_size // 2
+        to_y = (7 - rank_to_y[to_rank]) * square_size + square_size // 2
+    else:
+        from_x = file_to_x[from_file] * square_size + square_size // 2
+        from_y = rank_to_y[from_rank] * square_size + square_size // 2
+        to_x = file_to_x[to_file] * square_size + square_size // 2
+        to_y = rank_to_y[to_rank] * square_size + square_size // 2
     
     print(f"Drawing arrow from ({from_x}, {from_y}) to ({to_x}, {to_y})")  # Debug print
     
     # Draw arrow on canvas
     canvas.create_line(from_x, from_y, to_x, to_y,
-                      fill='yellow', width=5,
+                      fill='red', width=5,
                       arrow=tk.LAST, arrowshape=(16, 20, 6))
     
     # Add small close button in corner
@@ -361,6 +374,8 @@ def draw_overlay_arrow(screenshot, board_coords, move_str, root):
                          height=1)
     close_btn.place(x=0, y=0)
     
+    overlay = cv2.rotate(overlay, cv2.ROTATE_180)
+
     return overlay
 
 def detect_chessboard(image):
@@ -483,26 +498,71 @@ def show_detection_window(image, root):
 
 def get_best_move(fen):
     """Get best move from Stockfish"""
-    print("Starting Stockfish...")
-    engine = chess.engine.SimpleEngine.popen_uci(r"C:\Users\theob\Documents\stockfish\stockfish-windows-x86-64-avx2.exe")
-    
     try:
-        print(f"Creating board from FEN: {fen}")
-        board = chess.Board(fen)
+        print("\n=== Starting Best Move Calculation ===")
+        print(f"Input FEN: {fen}")
         
-        print("Getting best move...")
-        result = engine.play(board, chess.engine.Limit(time=2.0))
-        best_move = result.move
+        stockfish_path = r"C:\Users\theob\Documents\stockfish\stockfish-windows-x86-64-avx2.exe"
         
-        # Get the move in UCI format (e.g., "e2e4")
-        move_str = best_move.uci()
-        print(f"Found best move: {move_str}")
+        if not os.path.exists(stockfish_path):
+            raise FileNotFoundError(f"Stockfish not found at: {stockfish_path}")
+            
+        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
         
-        return move_str
-        
-    finally:
-        print("Closing Stockfish...")
-        engine.quit()
+        try:
+            # Modify FEN based on player color
+            fen_parts = fen.split(' ')
+            if window.team_selector.isChecked():  # If playing as black
+                # Don't modify the FEN - it's already flipped by convert_detections_to_fen
+                fen_parts[1] = 'b'  # Force black to move
+            else:
+                fen_parts[1] = 'w'  # Force white to move
+            fen = ' '.join(fen_parts)
+            
+            print(f"Using FEN: {fen}")
+            board = chess.Board(fen)
+            
+            print("\nValidating board position...")
+            if not board.is_valid():
+                print("Error: Invalid board position")
+                raise ValueError("Invalid board position")
+            print("Board position is valid")
+            
+            # Calculate best move
+            print("\nCalculating best move...")
+            result = engine.play(board, chess.engine.Limit(time=2.0))
+            
+            if result.move is None:
+                print("Error: Engine returned no move")
+                raise ValueError("Engine could not find a move")
+            
+            move_str = result.move.uci()
+            print(f"Found best move: {move_str}")
+            
+            # If playing as black, we need to flip the move coordinates
+            if window.team_selector.isChecked():
+                file_map = {'a': 'h', 'b': 'g', 'c': 'f', 'd': 'e', 
+                           'e': 'd', 'f': 'c', 'g': 'b', 'h': 'a'}
+                rank_map = {'1': '8', '2': '7', '3': '6', '4': '5',
+                           '5': '4', '6': '3', '7': '2', '8': '1'}
+                
+                from_file = file_map[move_str[0]]
+                from_rank = rank_map[move_str[1]]
+                to_file = file_map[move_str[2]]
+                to_rank = rank_map[move_str[3]]
+                
+                move_str = f"{from_file}{from_rank}{to_file}{to_rank}"
+                print(f"Flipped move for black's perspective: {move_str}")
+            
+            return move_str
+            
+        finally:
+            print("\nClosing Stockfish engine...")
+            engine.quit()
+            
+    except Exception as e:
+        print(f"\nDEBUG - Error in get_best_move: {str(e)}")
+        raise Exception(f"Stockfish error: {str(e)}")
 
 def convert_detections_to_fen(all_detections, board_size):
     """Convert piece detections to FEN string"""
@@ -515,6 +575,52 @@ def convert_detections_to_fen(all_detections, board_size):
         row = y // square_size
         col = x // square_size
         board[row][col] = piece
+    
+    # If playing as black, transform the board to black's perspective
+    if window.team_selector.isChecked():
+        # Create a new board with transformed positions
+        new_board = [['' for _ in range(8)] for _ in range(8)]
+        
+        for i in range(8):
+            for j in range(8):
+                if board[i][j]:
+                    # Calculate new position
+                    new_i = 7 - i
+                    new_j = 7 - j
+                    # Place the piece in its new position
+                    new_board[new_i][new_j] = board[i][j]
+        
+        board = new_board
+    
+    # Check for kings and ensure they're present
+    white_king_present = False
+    black_king_present = False
+    
+    for i in range(8):
+        for j in range(8):
+            if board[i][j] == 'K':
+                white_king_present = True
+            elif board[i][j] == 'k':
+                black_king_present = True
+    
+    # Add missing kings if needed
+    if not white_king_present:
+        if board[7][4] == '':  # Try e1 first
+            board[7][4] = 'K'
+        else:
+            for j in range(8):  # Try other squares on the back rank
+                if board[7][j] == '':
+                    board[7][j] = 'K'
+                    break
+    
+    if not black_king_present:
+        if board[0][4] == '':  # Try e8 first
+            board[0][4] = 'k'
+        else:
+            for j in range(8):  # Try other squares on the back rank
+                if board[0][j] == '':
+                    board[0][j] = 'k'
+                    break
     
     # Convert to FEN
     fen_rows = []
@@ -536,9 +642,13 @@ def convert_detections_to_fen(all_detections, board_size):
     # Join rows with '/'
     fen = '/'.join(fen_rows)
     
-    # Add additional FEN fields (assuming white to move, all castling available)
-    fen += ' w KQkq - 0 1'
+    # Add additional FEN fields with no castling rights
+    if window.team_selector.isChecked():  # If playing as black
+        fen += ' b - - 0 1'
+    else:
+        fen += ' w - - 0 1'
     
+    print(f"Generated FEN: {fen}")  # Debug print
     return fen
 
 class ChessDetectorWindow(QMainWindow):
@@ -568,7 +678,7 @@ class ChessDetectorWindow(QMainWindow):
         title_layout.setContentsMargins(10, 0, 10, 0)
         
         # Add title text
-        self.title_label = QLabel("Chess Piece Detector")
+        self.title_label = QLabel("Stockfish")
         self.title_label.setStyleSheet("color: white;")
         self.title_label.setFont(QFont('Arial', 10))
         title_layout.addWidget(self.title_label)
@@ -600,7 +710,7 @@ class ChessDetectorWindow(QMainWindow):
         content.setStyleSheet("background-color: #363636;")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(10, 10, 10, 10)
-        content_layout.setSpacing(15)  # Increased spacing between elements
+        content_layout.setSpacing(10)  # Default spacing between elements
         
         # Create capture button
         self.capture_btn = QPushButton("Capture Screen")
@@ -621,6 +731,9 @@ class ChessDetectorWindow(QMainWindow):
         self.capture_btn.clicked.connect(self.capture_screen)
         content_layout.addWidget(self.capture_btn)
         
+        # Add specific spacing after capture button
+        content_layout.addSpacing(5)  # Adjust this value to control space between Capture and Remove
+        
         # Create remove arrows button
         self.remove_arrows_btn = QPushButton("Remove Arrows")
         self.remove_arrows_btn.setStyleSheet("""
@@ -639,6 +752,9 @@ class ChessDetectorWindow(QMainWindow):
         self.remove_arrows_btn.setCursor(Qt.PointingHandCursor)
         self.remove_arrows_btn.clicked.connect(self.remove_arrows)
         content_layout.addWidget(self.remove_arrows_btn)
+        
+        # Add specific spacing after remove arrows button
+        content_layout.addSpacing(5)  # Adjust this value to control space between Remove and Debug
         
         # Add debug toggle switch
         self.debug_checkbox = QPushButton("Debug Mode: Off")
@@ -667,8 +783,45 @@ class ChessDetectorWindow(QMainWindow):
         self.debug_checkbox.clicked.connect(self.toggle_debug)
         content_layout.addWidget(self.debug_checkbox)
         
-        # Create piece style input with auto-complete
+        content_layout.addSpacing(15)  # Added spacing before team selector
+        
+        # Add team selector with more height
+        team_container = QHBoxLayout()
+        team_container.setSpacing(10)  # Added spacing between label and button
+        team_label = QLabel("Play as:")
+        team_label.setStyleSheet("color: white;")
+        team_container.addWidget(team_label)
+        
+        self.team_selector = QPushButton()
+        self.team_selector.setCheckable(True)
+        self.team_selector.setChecked(False)
+        self.team_selector.clicked.connect(self.toggle_team)
+        self.update_team_button()
+        self.team_selector.setStyleSheet("""
+            QPushButton {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 3px;
+                min-width: 80px;
+                min-height: 25px;
+            }
+            QPushButton:checked {
+                background-color: #1a1a1a;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+        """)
+        team_container.addWidget(self.team_selector)
+        content_layout.addLayout(team_container)
+        
+        content_layout.addSpacing(15)  # Added spacing before style input
+        
+        # Create piece style input with more height
         style_container = QHBoxLayout()
+        style_container.setSpacing(10)  # Added spacing between label and input
         style_label = QLabel("Style:")
         style_label.setStyleSheet("color: white;")
         style_container.addWidget(style_label)
@@ -682,6 +835,7 @@ class ChessDetectorWindow(QMainWindow):
                 padding: 8px;
                 border-radius: 3px;
                 margin-left: 5px;
+                min-height: 25px;
             }
             QLineEdit:focus {
                 background-color: #5a5a5a;
@@ -694,14 +848,25 @@ class ChessDetectorWindow(QMainWindow):
         completer = QCompleter(["neo", "cases", "chess24", "classic", "modern"])
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.style_input.setCompleter(completer)
-        
-        # Connect returnPressed instead of textChanged
         self.style_input.returnPressed.connect(self.on_style_enter)
         
         style_container.addWidget(self.style_input)
         content_layout.addLayout(style_container)
         
-        # Add progress bar
+        # Create instructions label
+        instructions = QLabel("")
+        instructions.setStyleSheet("color: white;")
+        instructions.setAlignment(Qt.AlignCenter)
+        content_layout.addWidget(instructions)
+        
+        # Add expanding spacer to push progress bar to bottom
+        content_layout.addStretch()
+        
+        # Add progress bar at the bottom with padding
+        progress_container = QWidget()
+        progress_layout = QVBoxLayout(progress_container)
+        progress_layout.setContentsMargins(10, 0, 10, 10)  # Add padding
+        
         self.progress_bar = QProgressBar()
         self.progress_bar.setStyleSheet("""
             QProgressBar {
@@ -719,20 +884,35 @@ class ChessDetectorWindow(QMainWindow):
         self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setValue(0)
-        content_layout.addWidget(self.progress_bar)
         
-        # Create instructions label
-        instructions = QLabel("Press button and switch\nto chess board window")
-        instructions.setStyleSheet("color: white;")
-        instructions.setAlignment(Qt.AlignCenter)
-        content_layout.addWidget(instructions)
+        progress_layout.addWidget(self.progress_bar)
+        content_layout.addWidget(progress_container)
+        
+        # Add error label (initially hidden)
+        self.error_label = QLabel()
+        self.error_label.setStyleSheet("""
+            QLabel {
+                color: #ff6b6b;
+                background-color: #4a4a4a;
+                padding: 20px;
+                border-radius: 3px;
+                margin: 15px;
+                min-height: 60px;
+                font-size: 12px;
+            }
+        """)
+        self.error_label.setAlignment(Qt.AlignCenter)
+        self.error_label.setWordWrap(True)
+        self.error_label.setContentsMargins(10, 10, 10, 10)
+        self.error_label.hide()
+        content_layout.addWidget(self.error_label)
         
         # Add content to main layout
         self.layout.addWidget(content)
         
         # Window setup
-        self.setMinimumSize(200, 300)  # Slightly increased height
-        self.resize(200, 300)
+        self.setMinimumSize(200, 500)  # Increased from 400 to 450
+        self.resize(200, 500)  # Also update initial size to match
         
         # For dragging
         self.dragging = False
@@ -759,73 +939,101 @@ class ChessDetectorWindow(QMainWindow):
         if event.button() == Qt.LeftButton:
             self.dragging = False
 
+    def show_error(self, message):
+        """Display error message in the window"""
+        self.error_label.setText(message)
+        self.error_label.show()
+        # Hide error after 3 seconds
+        QTimer.singleShot(3000, self.error_label.hide)
+
     def capture_screen(self):
         """Capture and process the screen"""
-        # Close any existing windows
-        if self.current_overlay:
-            self.current_overlay.close()
-            self.current_overlay = None
-        
-        if self.debug_window:
-            self.debug_window.close()
-            self.debug_window = None
-        
-        # Reset progress bar
-        self.progress_bar.setValue(0)
-        QApplication.processEvents()  # Update UI
-        
-        # Get screen size including all monitors
-        monitors = []
-        for m in get_monitors():
-            monitors.append({
-                'left': m.x,
-                'top': m.y,
-                'width': m.width,
-                'height': m.height
-            })
-        
-        # Calculate total bounding box
-        left = min(m['left'] for m in monitors)
-        top = min(m['top'] for m in monitors)
-        right = max(m['left'] + m['width'] for m in monitors)
-        bottom = max(m['top'] + m['height'] for m in monitors)
-        
-        # Capture the entire screen area immediately
-        screenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
-        screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-        
-        self.progress_bar.setValue(25)
-        QApplication.processEvents()
-        
-        cropped_board, board_coords = detect_chessboard(screenshot_cv)
-        if cropped_board is None:
-            print("Could not detect chessboard")
+        try:
+            # Reset error message
+            self.error_label.hide()
+            
+            # Close any existing windows
+            if self.current_overlay:
+                self.current_overlay.close()
+                self.current_overlay = None
+            
+            if self.debug_window:
+                self.debug_window.close()
+                self.debug_window = None
+            
+            # Reset progress bar
             self.progress_bar.setValue(0)
-            return
-        
-        self.progress_bar.setValue(50)
-        QApplication.processEvents()
-        
-        displayImage, detections = detectPieceOfChess(cropped_board)
-        
-        self.progress_bar.setValue(75)
-        QApplication.processEvents()
-        
-        # Show debug window only if enabled
-        if self.debug_enabled:
-            self.show_detection_window(displayImage)
-        
-        # Get best move and draw overlay
-        if detections:
-            fen = convert_detections_to_fen(detections, 2400)
-            try:
-                best_move = get_best_move(fen)
-                self.show_move_overlay(board_coords, best_move)
-                self.progress_bar.setValue(100)
-            except Exception as e:
-                print(f"Error processing move: {str(e)}")
+            QApplication.processEvents()
+            
+            # Get screen size including all monitors
+            monitors = []
+            for m in get_monitors():
+                monitors.append({
+                    'left': m.x,
+                    'top': m.y,
+                    'width': m.width,
+                    'height': m.height
+                })
+            
+            # Calculate total bounding box
+            left = min(m['left'] for m in monitors)
+            top = min(m['top'] for m in monitors)
+            right = max(m['left'] + m['width'] for m in monitors)
+            bottom = max(m['top'] + m['height'] for m in monitors)
+            
+            # Capture the entire screen area
+            screenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
+            screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+            
+            self.progress_bar.setValue(25)
+            QApplication.processEvents()
+            
+            cropped_board, board_coords = detect_chessboard(screenshot_cv)
+            if cropped_board is None or board_coords is None:
+                self.show_error("Could not detect chessboard.\nPlease ensure a chess.com board is visible.")
                 self.progress_bar.setValue(0)
-        else:
+                return
+            
+            self.progress_bar.setValue(50)
+            QApplication.processEvents()
+            
+            displayImage, detections = detectPieceOfChess(cropped_board)
+            if not detections:
+                self.show_error("No chess pieces detected.\nPlease ensure the board is clearly visible.")
+                self.progress_bar.setValue(0)
+                return
+            
+            self.progress_bar.setValue(75)
+            QApplication.processEvents()
+            
+            # Show debug window only if enabled
+            if self.debug_enabled:
+                self.show_detection_window(displayImage)
+            
+            # Get best move and draw overlay
+            try:
+                fen = convert_detections_to_fen(detections, 2400)
+                print(f"FEN: {fen}")
+                
+                # Create instance of ChessDetectorWindow if needed
+                if not hasattr(self, 'chess_detector'):
+                    self.chess_detector = ChessDetectorWindow()
+                
+                # Call get_best_move as a standalone function
+                best_move = get_best_move(fen)  # Remove self.
+                
+                if best_move:
+                    self.show_move_overlay(board_coords, best_move)
+                    self.progress_bar.setValue(100)
+                else:
+                    self.show_error("Could not find a valid move")
+                    self.progress_bar.setValue(0)
+            except Exception as e:
+                self.show_error(f"Error finding best move: {str(e)}")
+                self.progress_bar.setValue(0)
+                
+        except Exception as e:
+            self.show_error(f"Error: {str(e)}")
             self.progress_bar.setValue(0)
 
     def show_detection_window(self, image):
@@ -899,7 +1107,7 @@ class ChessDetectorWindow(QMainWindow):
                 to_y = rank_to_y[to_rank] * square_size + square_size // 2
                 
                 # Draw arrow
-                pen = QPen(QColor(255, 255, 0))  # Yellow color
+                pen = QPen(QColor(255, 0, 0))  # Yellow color
                 pen.setWidth(5)
                 painter.setPen(pen)
                 
@@ -927,6 +1135,7 @@ class ChessDetectorWindow(QMainWindow):
         
         # Create and add the canvas
         canvas = ArrowCanvas(overlay)
+        # canvas = cv2.rotate(canvas, cv2.ROTATE_180)
         canvas.resize(w, h)
         
         # Add small close button
@@ -1013,6 +1222,32 @@ class ChessDetectorWindow(QMainWindow):
         except Exception as e:
             print(f"Error updating chess pieces: {e}")
             self.progress_bar.setValue(0)
+
+    def toggle_team(self):
+        """Toggle between white and black team"""
+        self.update_team_button()
+
+    def update_team_button(self):
+        """Update team button text based on state"""
+        self.team_selector.setText("Black" if self.team_selector.isChecked() else "White")
+
+    def convert_move_for_black(self, move_str):
+        """Convert move coordinates for black perspective"""
+        if not self.team_selector.isChecked():  # If playing as white
+            return move_str
+            
+        # Convert file (a-h) and rank (1-8) for black's perspective
+        file_map = {'a': 'h', 'b': 'g', 'c': 'f', 'd': 'e', 
+                   'e': 'd', 'f': 'c', 'g': 'b', 'h': 'a'}
+        rank_map = {'1': '8', '2': '7', '3': '6', '4': '5',
+                   '5': '4', '6': '3', '7': '2', '8': '1'}
+        
+        from_file = file_map[move_str[0]]
+        from_rank = rank_map[move_str[1]]
+        to_file = file_map[move_str[2]]
+        to_rank = rank_map[move_str[3]]
+        
+        return f"{from_file}{from_rank}{to_file}{to_rank}"
 
 # Create and run application
 if __name__ == '__main__':
