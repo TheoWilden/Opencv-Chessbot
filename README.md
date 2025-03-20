@@ -1,72 +1,92 @@
-# Chess Piece Detection | OpenCV `matchTemplate()`
+# Chess Move Advisor | Screenshot Detection with Stockfish
 
 <p>
-	<img alt="python" src="https://img.shields.io/badge/Python-1E90FF?logo=python&logoColor=white">
+    <img alt="python" src="https://img.shields.io/badge/Python-1E90FF?logo=python&logoColor=white">
     <img alt="opencv" src="https://img.shields.io/badge/OpenCV-1F3AF7?logo=opencv&logoColor=01F701">
     <img alt="numpy" src="https://img.shields.io/badge/numpy-4AA6C9?logo=numpy&logoColor=white">
-    <img alt="jupyter" src="https://img.shields.io/badge/Jupyter-ededed?logo=jupyter&logoColor=F37726"/>
+    <img alt="stockfish" src="https://img.shields.io/badge/Stockfish-232323?logo=lichess&logoColor=white">
+    <img alt="pyqt5" src="https://img.shields.io/badge/PyQt5-41CD52?logo=qt&logoColor=white">
 </p>
 
+This application allows you to capture a screenshot of a chess game (such as on Chess.com), automatically detect the board position, and get the best move recommendation from Stockfish chess engine.
 
-This project involves loading multiple images of chess boards and utilizing the matchTemplate method of OpenCV to detect the pieces present on each board. As a result of this process, the output includes a comprehensive list of the detected chess piece names.
+## Features
 
-<p align="center">
-    <img src="dist/board.jpg" />
-    <img src="dist/board (9).jpg" />
-    <img src="dist/board (10).jpg" />
-    <img src="dist/board (1).jpg" />
-</p>
-
-
-|                Piece                 |      Name      | Short Name |                   Piece                    |      Name      | Short Name |
-| :----------------------------------: | :------------: | :--------: | :----------------------------------------: | :------------: | :--------: |
-|  ![King (White)](chess_piece/K.png)  |  King (White)  |     K      |  ![King (black)](chess_piece/k_black.png)  |  King (black)  |     k      |
-| ![Queen (white)](chess_piece/Q.png)  | Queen (White)  |     Q      | ![Queen (black)](chess_piece/q_black.png)  | Queen (black)  |     q      |
-|  ![Rook (White)](chess_piece/R.png)  |  Rook (White)  |     R      |  ![Rook (black)](chess_piece/r_black.png)  |  Rook (black)  |     r      |
-| ![Bishop (white)](chess_piece/B.png) | Bishop (White) |     B      | ![Bishop (black)](chess_piece/b_black.png) | Bishop (black) |     b      |
-| ![Knight (White)](chess_piece/N.png) | Knight (White) |     N      | ![Knight (black)](chess_piece/n_black.png) | Knight (black) |     n      |
-|  ![Pawn (White)](chess_piece/P.png)  |  Pawn (White)  |     P      |  ![Pawn (black)](chess_piece/p_black.png)  |  Pawn (black)  |     p      |
-
-
+- **Screen Capture**: Automatically takes a screenshot of your display
+- **Chess Board Detection**: Identifies a chess board on your screen using precise color detection
+- **Piece Recognition**: Uses OpenCV template matching to detect chess pieces and their positions
+- **FEN Generation**: Converts the detected board position to FEN notation
+- **Stockfish Integration**: Analyzes the position and suggests the best move
+- **Visual Overlay**: Displays the recommended move directly on your screen with an arrow
+- **Team Selection**: Option to play as white or black pieces
+- **Piece Style Customization**: Change the visual style of pieces used for detection
+- **Debug Mode**: View the detection results for troubleshooting
 
 ## Requirements
 
 - Python 3.x
 - OpenCV
-- Numpy
+- NumPy
+- PyQt5
+- Stockfish engine
+- Chess (Python library)
+- PIL (Pillow)
+- Requests
+- Screeninfo
+
+## Installation
+
+1. Clone this repository
+2. Install the required dependencies:
+
+```bash
+pip install opencv-python numpy pyqt5 pillow requests chess screeninfo
+```
+
+3. Download Stockfish engine from [the official site](https://stockfishchess.org/download/) and update the path in the code:
+
+```python
+stockfish_path = "path/to/your/stockfish/executable"
+```
 
 ## Usage
 
-To get started, first clone the repository and install the necessary dependencies by running the following command:
-
-```bash
-pip install opencv-python numpy
-```
-
-Next, place the chess board image files in the `test/` directory and the chess piece image files in the `chess_piece/` directory.
-
-There are two ways to execute the program:
-
-**Method 1: Running in Terminal**
-
-To run the script in the terminal, use the following command:
+Run the application with:
 
 ```bash
 python main.py
 ```
 
-**Method 2: Running in Jupyter Lab**
+### How to use:
 
-To run the script in `Jupyter Lab`, open the `main.ipynb` notebook and execute the code.
+1. Launch the application
+2. Select which side you're playing (White or Black)
+3. Click "Capture Screen" to analyze the current chess position on your screen
+4. An arrow will be displayed on the chess board showing the recommended move
+5. Click "Remove Arrows" to clear the overlay
 
-## Configuration
+### Configuration Options:
 
-The following configurations can be adjusted according to the user's preference:
+- **Debug Mode**: Toggle to view detailed information about the piece detection process
+- **Team Selection**: Choose whether you're playing as White or Black
+- **Piece Style**: Change the piece style to match the visual theme on Chess.com
 
-- `SHOW_IMAGE`: If set to `True`, the image with detected pieces will be displayed. Default is `True`.
-- `EXPORT_IMAGE`: If set to `True`, the image with detected pieces will be saved to the `dist/` directory. Default is `True`.
-- `chessPieceThreshold`: The threshold values for each chess piece can be adjusted according to the image quality. The default values are provided in the script.
-- `CHESS_BOARD_OUTPUT_DIR`: The directory where the output images will be saved. Default is `dist/`.
+## Customization
+
+You can adjust several parameters in the code:
+
+- `chessPieceThreshold`: Detection sensitivity for each piece type
+- `CHESS_BOARD_OUTPUT_DIR`: Where to save output images
+- `CHESS_PIECE_DIR`: Where to store chess piece templates
+
+## How It Works
+
+1. The application captures a screenshot of your display
+2. It identifies a chess board using color detection
+3. Each square is analyzed to detect chess pieces using template matching
+4. The detected position is converted to FEN notation
+5. Stockfish analyzes the position and suggests the best move
+6. A visual overlay displays the suggested move on your screen
 
 ## License
 
